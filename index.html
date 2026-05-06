@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>建築工程進度連動管理系統 (含天數預警)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; }
+        .card { background: white; border-radius: 1rem; border: 1px solid #e2e8f0; transition: all 0.3s ease; }
+        .card:hover { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05); }
+        .progress-bar-bg { background-color: #f1f5f9; border-radius: 9999px; height: 0.6rem; overflow: hidden; }
+        .modal { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(8px); }
+        .modal.active { display: flex; }
+        input[type="date"], input[type="number"], input[type="text"], select { outline: none; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 0.5rem 0.75rem; transition: border-color 0.2s; }
+        input:focus, select:focus { border-color: #6366f1; ring: 3px; ring-color: rgba(99, 102, 241, 0.2); }
+    </style>
+</head>
+<body class="p-4 lg:p-10 text-slate-800">
+
+    <!-- Header -->
+    <header class="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div>
+            <div class="flex items-center gap-3 mb-2">
+                <div class="bg-indigo-600 text-white p-2 rounded-xl">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M3 21h18M3 7v1a3 3 0 006 0V7m0 0V5a3 3 0 016 0v2m0 0h1a3 3 0 013 3v9m-4-3L12 15l-2 2"></path></svg>
+                </div>
+                <h1 class="text-3xl font-black text-slate-900 tracking-tighter">工程進度連動監控系統</h1>
+            </div>
+            <p class="text-slate-500 text-sm font-medium">全方位標準項目管理，自動計算 CPM 要徑偏差與天數預警。</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-4">
+            <button onclick="openConfigModal()" class="bg-white border border-slate-200 text-slate-600 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-slate-50 transition flex items-center gap-2">
+                維護項目庫
+            </button>
+            <button onclick="openMasterModal()" class="bg-indigo-600 text-white px-6 py-2.5 rounded-xl text-sm font-black hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition">
+                + 新增要徑
+            </button>
+        </div>
+    </header>
+
+    <!-- KPI Summary Row -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+        <!-- 完工進度 -->
+        <div class="card p-6 border-l-4 border-l-indigo-600">
+            <p class="text-slate-400 font-black mb-1 uppercase text-[10px] tracking-widest">總體完工進度 (按天數)</p>
+            <div class="flex items-end justify-between">
+                <div>
+                    <h3 class="text-3xl font-black text-slate-900" id="kpi-main-progress">0.0%</h3>
+                    <p class="text-[10px] font-bold text-indigo-500 mt-1" id="kpi-task-ratio">0/0 天已完成</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">預定完工日</p>
+                    <p class="text-sm font-black text-slate-700" id="kpi-final-deadline">----/--/--</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 總工期與超落 -->
+        <div class="card p-6 border-l-4 border-l-slate-400" id="kpi-deviation-card">
+            <div class="flex justify-between items-start mb-1">
+                <p class="text-slate-400 font-black uppercase text-[10px] tracking-widest">工期與偏差分析</p>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-500" id="kpi-deviation-status">尚無數據</span>
+            </div>
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase">全案總工期</p>
+                    <h3 class="text-2xl font-black text-slate-900" id="kpi-total-duration">0 天</h3>
+                </div>
+                <div class="text-right">
+                    <p class="text-[10px] font-bold text-slate-400 uppercase">累計總超落</p>
+                    <h3 class="text-2xl font-black text-slate-900" id="kpi-total-deviation">0 天</h3>
+                </div>
+            </div>
+        </div>
+
+        <!-- 預警指標 -->
+        <div class="card p-6 border-l-4 border-l-rose-500">
+            <p class="text-slate-400 font-black mb-1 uppercase text-[10px] tracking-widest">異常警示項目</p>
+            <div class="flex items-end justify-between">
+                <h3 class="text-3xl font-black text-slate-900" id="kpi-risk-count">0 項</h3>
+                <div class="text-right bg-rose-50 px-3 py-1 rounded-lg">
+                    <p class="text-[10px] font-bold text-rose-600 uppercase">圖說/發包逾期</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="space-y-8">
+        <!-- Master Table -->
+        <section class="card overflow-hidden">
+            <div class="px-8 py-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                <h2 class="font-black text-slate-800 text-sm tracking-widest flex items-center gap-2 uppercase">
+                    <span class="w-1.5 h-5 bg-indigo-600 rounded"></span> 要徑工項連動排程 (CPM)
+                </h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="text-[10px] text-slate-400 uppercase bg-white border-b tracking-widest font-black">
+                        <tr>
+                            <th class="px-6 py-5">要徑工項名稱</th>
+                            <th class="px-4 py-5 text-center">工期 (d)</th>
+                            <th class="px-6 py-5">預定進度</th>
+                            <th class="px-6 py-5 bg-indigo-50/30">修正進度 (連動)</th>
+                            <th class="px-6 py-5 bg-orange-50/30">實際完工日</th>
+                            <th class="px-6 py-5 text-center">超落狀況</th>
+                            <th class="px-4 py-5 text-center">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 font-medium text-slate-700" id="main-schedule-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Sub Lists -->
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+            <section class="card flex flex-col h-[550px]">
+                <div class="p-6 border-b bg-indigo-50/20 flex justify-between items-center">
+                    <h3 class="font-black text-indigo-900 text-sm tracking-widest uppercase">圖說進度 (前置作業)</h3>
+                    <button onclick="openItemModal('drawing')" class="text-xs font-bold text-indigo-600 hover:underline">+ 新增圖說</button>
+                </div>
+                <div class="flex-1 overflow-y-auto p-4 space-y-3" id="drawing-list"></div>
+            </section>
+            <section class="card flex flex-col h-[550px]">
+                <div class="p-6 border-b bg-slate-50 flex justify-between items-center">
+                    <h3 class="font-black text-slate-800 text-sm tracking-widest uppercase">發包進度 (前置作業)</h3>
+                    <button onclick="openItemModal('procure')" class="text-xs font-bold text-indigo-600 hover:underline">+ 新增發包</button>
+                </div>
+                <div class="flex-1 overflow-y-auto p-4 space-y-3" id="procure-list"></div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- Master Modal -->
+    <div id="masterModal" class="modal"><div class="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 m-4">
+        <h2 id="masterModalTitle" class="text-2xl font-black mb-6 text-slate-800 tracking-tighter italic">編輯要徑工項</h2>
+        <form id="masterForm" class="space-y-5">
+            <input type="hidden" id="masterId">
+            <div>
+                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">選擇標準工項</label>
+                <select id="masterNameSelect" required class="w-full"></select>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">預定開始日 (基準)</label><input type="date" id="masterStart" required class="w-full"></div>
+                <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">工期 (天)</label><input type="number" id="masterDuration" min="1" required class="w-full"></div>
+            </div>
+            <div><label class="block text-[10px] font-black text-orange-500 uppercase tracking-widest mb-1.5">實際完工日</label><input type="date" id="masterActualEnd" class="w-full bg-orange-50 border-orange-100"></div>
+            <div class="flex gap-3 pt-4">
+                <button type="button" id="masterDeleteBtn" class="px-5 py-3 text-rose-500 font-bold hidden">刪除</button>
+                <div class="flex-1 flex gap-3">
+                    <button type="button" onclick="closeMasterModal()" class="flex-1 px-5 py-3 border rounded-2xl text-slate-400 font-bold">取消</button>
+                    <button type="submit" class="flex-1 px-5 py-3 bg-indigo-600 text-white rounded-2xl font-black">儲存設定</button>
+                </div>
+            </div>
+        </form>
+    </div></div>
+
+    <!-- Item Modal (Drawing/Procure) -->
+    <div id="itemModal" class="modal"><div class="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 m-4">
+        <h2 id="modalTitle" class="text-2xl font-black mb-6 text-slate-800 tracking-tighter italic">項目編輯</h2>
+        <form id="itemForm" class="space-y-4">
+            <input type="hidden" id="itemType"><input type="hidden" id="itemId">
+            <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">項目名稱</label><select id="itemNameSelect" required class="w-full"></select></div>
+            <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">關聯要徑</label><select id="itemRelation" class="w-full"></select></div>
+            <div class="grid grid-cols-2 gap-4">
+                <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">前置天數 (T-N)</label><input type="number" id="itemDays" min="0" required class="w-full"></div>
+                <div><label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">執行狀態</label><select id="itemStatus" class="w-full"><option value="Done">已完成</option><option value="Progress">進行中</option><option value="Pending">待辦</option></select></div>
+            </div>
+            <div class="flex gap-3 pt-4">
+                <button type="button" id="deleteBtn" class="px-5 py-3 text-rose-500 font-bold hidden">刪除</button>
+                <div class="flex-1 flex gap-3"><button type="button" onclick="closeItemModal()" class="flex-1 px-5 py-3 border rounded-2xl text-slate-400 font-bold">取消</button><button type="submit" class="flex-1 px-5 py-3 bg-indigo-600 text-white rounded-2xl font-black">確認儲存</button></div>
+            </div>
+        </form>
+    </div></div>
+
+    <!-- Config Modal -->
+    <div id="configModal" class="modal"><div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-8 m-4 max-h-[80vh] flex flex-col">
+        <h2 class="text-2xl font-black mb-6 text-slate-800 tracking-tighter italic">標準項目庫維護</h2>
+        <div class="flex-1 overflow-y-auto space-y-8 pr-2">
+            <div>
+                <h3 class="text-[10px] font-black text-indigo-600 mb-3 uppercase tracking-widest flex items-center gap-2"><span class="w-2 h-2 bg-indigo-600 rounded-full"></span> 要徑標準工項</h3>
+                <div id="config-master-list" class="space-y-2"></div>
+                <button onclick="addConfigItem('master')" class="mt-3 text-xs text-indigo-600 font-black">+ 新增標準要徑</button>
+            </div>
+            <div class="border-t pt-6">
+                <h3 class="text-[10px] font-black text-slate-400 mb-3 uppercase tracking-widest flex items-center gap-2"><span class="w-2 h-2 bg-slate-400 rounded-full"></span> 圖說進度類</h3>
+                <div id="config-drawing-list" class="space-y-2"></div>
+                <button onclick="addConfigItem('drawing')" class="mt-3 text-xs text-slate-500 font-black">+ 新增標準圖說</button>
+            </div>
+            <div class="border-t pt-6">
+                <h3 class="text-[10px] font-black text-slate-400 mb-3 uppercase tracking-widest flex items-center gap-2"><span class="w-2 h-2 bg-slate-400 rounded-full"></span> 發包進度類</h3>
+                <div id="config-procure-list" class="space-y-2"></div>
+                <button onclick="addConfigItem('procure')" class="mt-3 text-xs text-slate-500 font-black">+ 新增標準發包</button>
+            </div>
+        </div>
+        <button onclick="closeConfigModal()" class="mt-8 py-4 bg-slate-900 text-white rounded-2xl font-black shadow-xl shadow-slate-200">完成設定並關閉</button>
+    </div></div>
+
+    <script>
+        const baseDate = new Date();
+        const todayStr = baseDate.toISOString().split('T')[0];
+
+        let config = {
+            master: ["地下室結構工程", "地面層結構工程", "鋁門窗工程", "景觀工程", "室內裝修工程"],
+            drawing: ["地下室結構圖", "地面層配筋圖", "鋁窗大樣圖", "景觀施工圖", "機電圖說"],
+            procure: ["鋼筋採購", "混凝土供應", "鋁門窗合約", "外牆石材發包", "室內裝修發包"]
+        };
+
+        let masterTasks = [
+            { id: 1, name: "地下室結構工程", start: "2024-01-01", duration: 60, actualEnd: "2024-03-01" },
+            { id: 2, name: "地面層結構工程", start: "2024-03-01", duration: 90, actualEnd: "" },
+            { id: 3, name: "鋁門窗工程", start: "2024-06-01", duration: 45, actualEnd: "" }
+        ];
+
+        let processedTasks = [];
+
+        let drawingItems = [
+            { id: 101, name: "地下室結構圖", taskId: 1, status: "Done", leadDays: 60 },
+            { id: 102, name: "地面層配筋圖", taskId: 2, status: "Progress", leadDays: 60 }
+        ];
+
+        let procureItems = [
+            { id: 201, name: "鋼筋採購", taskId: 1, status: "Done", leadDays: 30 },
+            { id: 202, name: "鋁門窗合約", taskId: 3, status: "Pending", leadDays: 45 }
+        ];
+
+        function processLogic() {
+            let sorted = JSON.parse(JSON.stringify(masterTasks)).sort((a, b) => new Date(a.start) - new Date(b.start));
+            for (let i = 0; i < sorted.length; i++) {
+                let task = sorted[i];
+                task.planEnd = getEndDateString(task.start, task.duration);
+                if (i === 0) {
+                    task.revisedStart = task.start;
+                } else {
+                    const prev = sorted[i-1];
+                    task.revisedStart = prev.actualEnd ? prev.actualEnd : prev.revisedEnd;
+                }
+                task.revisedEnd = getEndDateString(task.revisedStart, task.duration);
+            }
+            processedTasks = sorted;
+        }
+
+        function updateUI() {
+            processLogic();
+            renderMasterTable();
+            renderSubLists();
+            updateKPIs();
+        }
+
+        function renderMasterTable() {
+            const body = document.getElementById('main-schedule-body');
+            const select = document.getElementById('itemRelation');
+            body.innerHTML = ''; select.innerHTML = '';
+            
+            processedTasks.forEach(task => {
+                let diffText = ""; 
+                let diffClass = "text-indigo-500";
+                let diffVal = 0;
+                let hasActual = !!task.actualEnd;
+                
+                if (hasActual) {
+                    const planDate = new Date(task.planEnd), actualDate = new Date(task.actualEnd);
+                    diffVal = Math.ceil((planDate - actualDate) / (1000 * 60 * 60 * 24));
+                    diffText = diffVal >= 0 ? `提前 ${diffVal}d` : `落後 ${Math.abs(diffVal)}d`;
+                    diffClass = diffVal >= 0 ? "text-emerald-500" : "text-rose-500";
+                }
+
+                const opt = document.createElement('option');
+                opt.value = task.id; opt.textContent = task.name;
+                select.appendChild(opt);
+
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 transition-colors";
+                tr.innerHTML = `
+                    <td class="px-6 py-5 font-black text-slate-800">${task.name}</td>
+                    <td class="px-4 py-5 text-center font-mono text-slate-400">${task.duration}</td>
+                    <td class="px-6 py-5">
+                        <div class="text-xs font-bold text-slate-500">始: ${task.start}</div>
+                        <div class="text-xs font-bold text-slate-500">迄: ${task.planEnd}</div>
+                    </td>
+                    <td class="px-6 py-5 bg-indigo-50/10">
+                        <div class="text-xs font-black text-indigo-700">始: ${task.revisedStart}</div>
+                        <div class="text-xs font-black text-indigo-700">迄: ${task.revisedEnd}</div>
+                    </td>
+                    <td class="px-6 py-5">
+                        <input type="date" value="${task.actualEnd || ''}" onchange="quickUpdateActual(${task.id}, this.value)" class="text-xs font-bold bg-orange-50 border-orange-100 py-1 rounded w-full">
+                    </td>
+                    <td class="px-6 py-5 text-center">
+                        ${hasActual ? `
+                            <span class="text-[10px] font-black uppercase ${diffClass}">${diffText}</span>
+                            <div class="w-full progress-bar-bg mt-2">
+                                <div class="${diffVal >= 0 ? 'bg-emerald-500' : 'bg-rose-500'} h-full" style="width: 100%"></div>
+                            </div>
+                        ` : `
+                            <span class="text-[10px] font-black text-slate-200 uppercase">進行中</span>
+                        `}
+                    </td>
+                    <td class="px-4 py-5 text-center">
+                        <button onclick="openMasterModal(${task.id})" class="text-slate-300 hover:text-indigo-600">✎</button>
+                    </td>
+                `;
+                body.appendChild(tr);
+            });
+        }
+
+        function renderSubLists() {
+            const dList = document.getElementById('drawing-list');
+            const pList = document.getElementById('procure-list');
+            dList.innerHTML = ''; pList.innerHTML = '';
+            
+            const listRenderer = (items, el, type) => {
+                items.forEach(item => {
+                    const task = processedTasks.find(t => t.id === item.taskId) || {revisedStart: todayStr};
+                    const deadline = calculateDeadline(task.revisedStart, item.leadDays);
+                    
+                    const deadlineDate = new Date(deadline);
+                    const todayDate = new Date(todayStr);
+                    const timeDiff = Math.ceil((deadlineDate - todayDate) / (1000 * 60 * 60 * 24));
+                    
+                    let warningText = "";
+                    let warningClass = "text-slate-400";
+                    let isOverdue = false;
+
+                    if (item.status !== 'Done') {
+                        if (timeDiff < 0) {
+                            isOverdue = true;
+                            warningText = `已逾期 ${Math.abs(timeDiff)} 天`;
+                            warningClass = "text-rose-600 font-black";
+                        } else {
+                            warningText = `剩餘 ${timeDiff} 天`;
+                            warningClass = timeDiff <= 7 ? "text-orange-500 font-bold" : "text-emerald-600 font-bold";
+                        }
+                    }
+
+                    const div = document.createElement('div');
+                    div.className = `p-4 border rounded-2xl flex justify-between items-center cursor-pointer hover:shadow-md transition-all ${isOverdue ? 'border-rose-200 bg-rose-50/50' : 'bg-white border-slate-100'}`;
+                    div.onclick = () => openItemModal(type, item.id);
+                    div.innerHTML = `
+                        <div class="flex-1">
+                            <p class="font-black text-slate-800 text-sm">${item.name}</p>
+                            <div class="flex items-center gap-3 mt-1.5">
+                                <p class="text-xs text-slate-500 font-bold tracking-tight">期限: ${deadline}</p>
+                                <span class="text-[10px] uppercase ${warningClass}">${warningText}</span>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                             <span class="px-3 py-1 rounded-lg text-[10px] font-black ${getStatusClass(item.status)}">${getStatusText(item.status)}</span>
+                        </div>
+                    `;
+                    el.appendChild(div);
+                });
+            };
+            listRenderer(drawingItems, dList, 'drawing');
+            listRenderer(procureItems, pList, 'procure');
+        }
+
+        function updateKPIs() {
+            if(processedTasks.length === 0) return;
+            const firstStart = new Date(processedTasks[0].start);
+            const lastTask = processedTasks[processedTasks.length-1];
+            const lastEnd = new Date(lastTask.planEnd);
+            const totalProjectDays = Math.max(1, Math.ceil((lastEnd - firstStart) / (1000 * 60 * 60 * 24)));
+            
+            document.getElementById('kpi-total-duration').textContent = `${totalProjectDays} 天`;
+            document.getElementById('kpi-final-deadline').textContent = lastTask.planEnd;
+            
+            // 計算完工天數總和
+            const finishedDurationSum = processedTasks.filter(t => t.actualEnd).reduce((sum, t) => sum + parseInt(t.duration), 0);
+            
+            // 精確到小數第一位
+            const progressPercent = Math.min(100, (finishedDurationSum / totalProjectDays) * 100).toFixed(1);
+            document.getElementById('kpi-main-progress').textContent = `${progressPercent}%`;
+            document.getElementById('kpi-task-ratio').textContent = `${finishedDurationSum}/${totalProjectDays} 天已完成`;
+            
+            let totalDev = 0;
+            processedTasks.forEach(t => {
+                if(t.actualEnd) {
+                    const plan = new Date(t.planEnd);
+                    const actual = new Date(t.actualEnd);
+                    totalDev += Math.ceil((plan - actual) / (1000 * 60 * 60 * 24));
+                }
+            });
+            
+            const devEl = document.getElementById('kpi-total-deviation');
+            const devStatusEl = document.getElementById('kpi-deviation-status');
+            const devCard = document.getElementById('kpi-deviation-card');
+            devEl.textContent = `${Math.abs(totalDev)} 天`;
+            
+            if(totalDev > 0) {
+                devStatusEl.textContent = "進度提前"; 
+                devStatusEl.className = "text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-600";
+                devCard.style.borderLeftColor = "#10b981";
+                devEl.className = "text-2xl font-black text-emerald-600";
+            } else if(totalDev < 0) {
+                devStatusEl.textContent = "進度落後"; 
+                devStatusEl.className = "text-[10px] font-bold px-2 py-0.5 rounded bg-rose-50 text-rose-600";
+                devCard.style.borderLeftColor = "#ef4444";
+                devEl.className = "text-2xl font-black text-rose-600";
+            } else {
+                devStatusEl.textContent = finishedDurationSum > 0 ? "按計畫進行" : "尚辦理中"; 
+                devStatusEl.className = "text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-500";
+                devCard.style.borderLeftColor = "#94a3b8";
+                devEl.className = "text-2xl font-black text-slate-900";
+            }
+            
+            const risks = [...drawingItems, ...procureItems].filter(item => {
+                const task = processedTasks.find(t => t.id === item.taskId) || {revisedStart: todayStr};
+                return item.status !== 'Done' && new Date(calculateDeadline(task.revisedStart, item.leadDays)) < baseDate;
+            }).length;
+            document.getElementById('kpi-risk-count').textContent = risks + " 項";
+        }
+
+        function openConfigModal() { renderConfigItems(); document.getElementById('configModal').classList.add('active'); }
+        function closeConfigModal() { document.getElementById('configModal').classList.remove('active'); updateUI(); }
+        
+        function renderConfigItems() {
+            ['master', 'drawing', 'procure'].forEach(type => {
+                const box = document.getElementById(`config-${type}-list`);
+                box.innerHTML = '';
+                config[type].forEach((name, i) => {
+                    box.innerHTML += `<div class="flex gap-2"><input type="text" value="${name}" onchange="config.${type}[${i}]=this.value" class="flex-1 text-xs py-2 border-slate-200 rounded"><button onclick="config.${type}.splice(${i},1);renderConfigItems()" class="text-rose-400 text-xs px-2 italic font-bold">✕</button></div>`;
+                });
+            });
+        }
+        
+        function addConfigItem(type) { config[type].push("新定義工項"); renderConfigItems(); }
+
+        function openMasterModal(id = null) {
+            const nameSelect = document.getElementById('masterNameSelect');
+            nameSelect.innerHTML = config.master.map(n => `<option value="${n}">${n}</option>`).join('');
+            const t = id ? masterTasks.find(x => x.id === id) : null;
+            document.getElementById('masterId').value = id || '';
+            document.getElementById('masterDeleteBtn').classList.toggle('hidden', !id);
+            if(t) {
+                nameSelect.value = t.name;
+                document.getElementById('masterStart').value = t.start;
+                document.getElementById('masterDuration').value = t.duration;
+                document.getElementById('masterActualEnd').value = t.actualEnd || '';
+            } else {
+                document.getElementById('masterForm').reset();
+                document.getElementById('masterStart').value = todayStr;
+                document.getElementById('masterDuration').value = 30;
+            }
+            document.getElementById('masterModal').classList.add('active');
+        }
+        
+        function closeMasterModal() { document.getElementById('masterModal').classList.remove('active'); }
+        
+        document.getElementById('masterForm').onsubmit = (e) => {
+            e.preventDefault();
+            const id = document.getElementById('masterId').value;
+            const data = { 
+                id: id ? parseInt(id) : Date.now(), 
+                name: document.getElementById('masterNameSelect').value, 
+                start: document.getElementById('masterStart').value, 
+                duration: parseInt(document.getElementById('masterDuration').value), 
+                actualEnd: document.getElementById('masterActualEnd').value 
+            };
+            if(id) { masterTasks[masterTasks.findIndex(t => t.id === parseInt(id))] = data; }
+            else { masterTasks.push(data); }
+            closeMasterModal(); updateUI();
+        };
+        
+        document.getElementById('masterDeleteBtn').onclick = () => {
+            const id = parseInt(document.getElementById('masterId').value);
+            masterTasks = masterTasks.filter(t => t.id !== id);
+            closeMasterModal(); updateUI();
+        };
+
+        function openItemModal(type, id = null) {
+            const list = type === 'drawing' ? drawingItems : procureItems;
+            const item = id ? list.find(i => i.id === id) : null;
+            const nameSelect = document.getElementById('itemNameSelect');
+            nameSelect.innerHTML = config[type].map(n => `<option value="${n}">${n}</option>`).join('');
+            document.getElementById('itemType').value = type;
+            document.getElementById('itemId').value = id || '';
+            document.getElementById('deleteBtn').classList.toggle('hidden', !id);
+            if(item) {
+                nameSelect.value = item.name;
+                document.getElementById('itemRelation').value = item.taskId;
+                document.getElementById('itemDays').value = item.leadDays;
+                document.getElementById('itemStatus').value = item.status;
+            } else {
+                document.getElementById('itemForm').reset();
+                if(masterTasks.length > 0) document.getElementById('itemRelation').value = masterTasks[0].id;
+                document.getElementById('itemDays').value = 30;
+            }
+            document.getElementById('itemModal').classList.add('active');
+        }
+        
+        function closeItemModal() { document.getElementById('itemModal').classList.remove('active'); }
+        
+        document.getElementById('itemForm').onsubmit = (e) => {
+            e.preventDefault();
+            const type = document.getElementById('itemType').value, id = document.getElementById('itemId').value;
+            const list = type === 'drawing' ? drawingItems : procureItems;
+            const data = { 
+                id: id ? parseInt(id) : Date.now(), 
+                name: document.getElementById('itemNameSelect').value, 
+                taskId: parseInt(document.getElementById('itemRelation').value), 
+                leadDays: parseInt(document.getElementById('itemDays').value), 
+                status: document.getElementById('itemStatus').value 
+            };
+            if(id) { list[list.findIndex(i => i.id === parseInt(id))] = data; }
+            else { list.push(data); }
+            closeItemModal(); updateUI();
+        };
+        
+        document.getElementById('deleteBtn').onclick = () => {
+            const type = document.getElementById('itemType').value, id = parseInt(document.getElementById('itemId').value);
+            if(type === 'drawing') drawingItems = drawingItems.filter(i => i.id !== id);
+            else procureItems = procureItems.filter(i => i.id !== id);
+            closeItemModal(); updateUI();
+        };
+
+        function getEndDateString(s, d) { const date = new Date(s); date.setDate(date.getDate() + parseInt(d)); return date.toISOString().split('T')[0]; }
+        function calculateDeadline(s, l) { const date = new Date(s); date.setDate(date.getDate() - l); return date.toISOString().split('T')[0]; }
+        function getStatusClass(s) { return s==='Done' ? 'bg-emerald-100 text-emerald-700' : (s==='Progress' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'); }
+        function getStatusText(s) { return s==='Done' ? '已完成' : (s==='Progress' ? '進行中' : '待辦'); }
+        function quickUpdateActual(id, val) { const t = masterTasks.find(x => x.id === id); if(t) { t.actualEnd = val; updateUI(); } }
+
+        window.onload = updateUI;
+    </script>
+</body>
+</html>
